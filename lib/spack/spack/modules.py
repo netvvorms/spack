@@ -259,3 +259,74 @@ class TclModule(EnvModule):
                 m_file.write("prepend-path %s \"%s\"\n" % (var, directory))
 
         m_file.write("prepend-path CMAKE_PREFIX_PATH \"%s\"\n" % self.spec.prefix)
+
+
+import spack.compilers
+
+
+class LmodModule(EnvModule):
+    name = 'lmod'
+    path = join_path(spack.share_path, "lmod", "modulefiles")
+
+    @property
+    def file_name(self):
+        modulefiles_name = LmodModule.path
+        # FIXME: How can I check if a spec has been constructed using the system compiler?
+        if self._use_default_compiler():
+            # If the module is installed using the system compiler put the modulefile in 'Core'
+            hierarchy_name = 'Core'
+        elif not self._is_mpi_dependent():
+            # If the module is serial and built using a compiler other than the system one,
+            # put the modulefile in '<Compiler>/<Version>'
+            hierarchy_name = '{compiler_name}/{compiler_version}}'.format(
+                compiler_name=self.spec.compiler.name,
+                compiler_version=self.spec.compiler.version
+            )
+        elif self._is_mpi_dependent() and not self._use_default_compiler():
+            # If the module is MPI parallel then put the modulefile in '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
+            pass
+            # TODO: implement this case
+        else:
+            # If I am here it means that I am using the system compiler with some MPI
+            # TODO : decide how to deal with this case
+            pass
+        fullname = join_path(modulefiles_name, hierarchy_name, self.spec.name, str(self.spec.version) + '.lua')
+        return fullname
+
+    @property
+    def use_name(self):
+        pass
+
+    def _write(self, m_file):
+        # TODO: add family
+        # Header as in
+        # https://www.tacc.utexas.edu/research-development/tacc-projects/lmod/advanced-user-guide/more-about-writing-module-files
+        m_file.write("-- -*- lua -*-\n")
+        # Short description -> whatis()
+        if self.short_description:
+            m_file.write("whatis([[Name : {name}]])\n".format(name=self.spec.name))
+            m_file.write("whatis([[Version : {version}]])\n".format(version=self.spec.version))
+
+        # Long description -> help()
+        if self.long_description:
+            doc = re.sub(r'"', '\"', self.long_description)
+            m_file.write("help([[{documentation}]])\n".format(documentation=doc))
+
+        # Path alterations
+        for var, dirs in self.paths.items():
+            for directory in dirs:
+                m_file.write("prepend_path(\"{variable}\", \"{directory}\")\n".format(variable=var, directory=directory))
+
+        m_file.write("prepend_path(\"CMAKE_PREFIX_PATH\", \"{cmake_prefix}\")\n".format(cmake_prefix=self.spec.prefix))
+
+    def _use_default_compiler(self):
+        """
+        True if the spec uses the default compiler (which is assumed to be the one provided by the system)
+
+        :return: True or False
+        """
+        return self.spec.compiler == spack.compilers.default_compiler()
+
+    def _is_mpi_dependent(self):
+        # TODO : implement this
+        pass
