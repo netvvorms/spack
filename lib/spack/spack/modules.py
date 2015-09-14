@@ -268,21 +268,26 @@ class LmodModule(EnvModule):
     name = 'lmod'
     path = join_path(spack.share_path, "lmod", "modulefiles")
 
+    def __init__(self, spec=None):
+        super(LmodModule, self).__init__(spec)
+        # Sets tha appropriate category to be used with the 'family' function
+        if self.spec.name in spack.compilers.supported_compilers():
+            self.family = 'compiler'
+        else:
+            self.family = None
+
     @property
     def file_name(self):
         modulefiles_name = LmodModule.path
         # FIXME: How can I check if a spec has been constructed using the system compiler?
-        if self._use_default_compiler():
+        if self._use_system_compiler():
             # If the module is installed using the system compiler put the modulefile in 'Core'
             hierarchy_name = 'Core'
         elif not self._is_mpi_dependent():
             # If the module is serial and built using a compiler other than the system one,
             # put the modulefile in '<Compiler>/<Version>'
-            hierarchy_name = '{compiler_name}/{compiler_version}}'.format(
-                compiler_name=self.spec.compiler.name,
-                compiler_version=self.spec.compiler.version
-            )
-        elif self._is_mpi_dependent() and not self._use_default_compiler():
+            hierarchy_name = self._compiler_module_directory(self.spec.compiler.name, self.spec.compiler.version)
+        elif self._is_mpi_dependent() and not self._use_system_compiler():
             # If the module is MPI parallel then put the modulefile in '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
             pass
             # TODO: implement this case
@@ -297,8 +302,14 @@ class LmodModule(EnvModule):
     def use_name(self):
         pass
 
+    @staticmethod
+    def _compiler_module_directory(name, version):
+        return '{compiler_name}/{compiler_version}'.format(
+                compiler_name=name,
+                compiler_version=version
+            )
+
     def _write(self, m_file):
-        # TODO: add family
         # Header as in
         # https://www.tacc.utexas.edu/research-development/tacc-projects/lmod/advanced-user-guide/more-about-writing-module-files
         m_file.write("-- -*- lua -*-\n")
@@ -315,17 +326,33 @@ class LmodModule(EnvModule):
         # Path alterations
         for var, dirs in self.paths.items():
             for directory in dirs:
-                m_file.write("prepend_path(\"{variable}\", \"{directory}\")\n".format(variable=var, directory=directory))
-
+                m_file.write("prepend_path(\"{variable}\", \"{directory}\")\n".format(
+                    variable=var,
+                    directory=directory)
+                )
         m_file.write("prepend_path(\"CMAKE_PREFIX_PATH\", \"{cmake_prefix}\")\n".format(cmake_prefix=self.spec.prefix))
 
-    def _use_default_compiler(self):
+        # Add family protection
+        if self.family is not None:
+            m_file.write("family(\"{family}\")\n".format(family=self.family))
+
+        # Prepend path if family is 'compiler' or 'mpi'
+        if self.family is 'compiler':
+            hierarchy_name = self._compiler_module_directory(self.spec.name, self.spec.version)
+            fullname = join_path(LmodModule.path, hierarchy_name)
+            m_file.write("prepend_path(\"MODULE_PATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
+
+    def _use_system_compiler(self):
         """
         True if the spec uses the default compiler (which is assumed to be the one provided by the system)
 
         :return: True or False
         """
-        return self.spec.compiler == spack.compilers.default_compiler()
+        compiler = spack.compilers.compiler_for_spec(self.spec.compiler)
+        compiler_directory = os.path.dirname(compiler.cc)
+        if spack.prefix in compiler_directory:
+            return False
+        return True
 
     def _is_mpi_dependent(self):
         # TODO : implement this
