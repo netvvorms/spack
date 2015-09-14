@@ -273,13 +273,14 @@ class LmodModule(EnvModule):
         # Sets tha appropriate category to be used with the 'family' function
         if self.spec.name in spack.compilers.supported_compilers():
             self.family = 'compiler'
+        elif self.spec.package.provides('mpi'):
+            self.family = 'mpi'
         else:
             self.family = None
 
     @property
     def file_name(self):
         modulefiles_name = LmodModule.path
-        # FIXME: How can I check if a spec has been constructed using the system compiler?
         if self._use_system_compiler():
             # If the module is installed using the system compiler put the modulefile in 'Core'
             hierarchy_name = 'Core'
@@ -289,8 +290,18 @@ class LmodModule(EnvModule):
             hierarchy_name = self._compiler_module_directory(self.spec.compiler.name, self.spec.compiler.version)
         elif self._is_mpi_dependent() and not self._use_system_compiler():
             # If the module is MPI parallel then put the modulefile in '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
-            pass
-            # TODO: implement this case
+            cname = self.spec.compiler.name
+            cversion = self.spec.compiler.version
+            for key, val in self.spec.dependencies.items():
+                package = spack.db.get(str(val))
+                if package.provides('mpi'):
+                    mpi_name = package.name
+                    mpi_version = package.version
+                    break
+            else:
+                raise RuntimeError('No MPI dependency found')
+
+            hierarchy_name = self._mpi_module_directory(cname, cversion, mpi_name, mpi_version)
         else:
             # If I am here it means that I am using the system compiler with some MPI
             # TODO : decide how to deal with this case
@@ -307,6 +318,15 @@ class LmodModule(EnvModule):
         return '{compiler_name}/{compiler_version}'.format(
                 compiler_name=name,
                 compiler_version=version
+            )
+
+    @staticmethod
+    def _mpi_module_directory(compiler_name, compiler_version, mpi_name, mpi_version):
+        return '{mpi_name}/{mpi_version}/{compiler_name}/{compiler_version}'.format(
+                mpi_name=mpi_name,
+                mpi_version=mpi_version,
+                compiler_name=compiler_name,
+                compiler_version=compiler_version
             )
 
     def _write(self, m_file):
@@ -340,7 +360,12 @@ class LmodModule(EnvModule):
         if self.family is 'compiler':
             hierarchy_name = self._compiler_module_directory(self.spec.name, self.spec.version)
             fullname = join_path(LmodModule.path, hierarchy_name)
-            m_file.write("prepend_path(\"MODULE_PATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
+            m_file.write("prepend_path(\"MODULEPATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
+        elif self.family is 'mpi':
+            s = self.spec
+            hierarchy_name = self._mpi_module_directory(s.compiler.name, s.compiler.version, s.name, s.version)
+            fullname = join_path(LmodModule.path, hierarchy_name)
+            m_file.write("prepend_path(\"MODULEPATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
 
     def _use_system_compiler(self):
         """
@@ -348,6 +373,7 @@ class LmodModule(EnvModule):
 
         :return: True or False
         """
+        # FIXME: How can I check if a spec has been constructed using the system compiler?
         compiler = spack.compilers.compiler_for_spec(self.spec.compiler)
         compiler_directory = os.path.dirname(compiler.cc)
         if spack.prefix in compiler_directory:
@@ -355,5 +381,4 @@ class LmodModule(EnvModule):
         return True
 
     def _is_mpi_dependent(self):
-        # TODO : implement this
-        pass
+        return 'mpi' in self.spec.package.dependencies
