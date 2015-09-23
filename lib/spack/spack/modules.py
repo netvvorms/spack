@@ -56,6 +56,9 @@ from llnl.util.filesystem import join_path, mkdirp
 
 import spack
 
+import spack.compilers  # Needed by LmodModules
+
+
 """Registry of all types of modules.  Entries created by EnvModule's
    metaclass."""
 module_types = {}
@@ -261,9 +264,6 @@ class TclModule(EnvModule):
         m_file.write("prepend-path CMAKE_PREFIX_PATH \"%s\"\n" % self.spec.prefix)
 
 
-import spack.compilers
-
-
 class LmodModule(EnvModule):
     name = 'lmod'
     path = join_path(spack.share_path, "lmod", "modulefiles")
@@ -290,18 +290,9 @@ class LmodModule(EnvModule):
             hierarchy_name = self._compiler_module_directory(self.spec.compiler.name, self.spec.compiler.version)
         elif self._is_mpi_dependent() and not self._use_system_compiler():
             # If the module is MPI parallel then put the modulefile in '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
-            cname = self.spec.compiler.name
-            cversion = self.spec.compiler.version
-            for key, val in self.spec.dependencies.items():
-                package = spack.db.get(str(val))
-                if package.provides('mpi'):
-                    mpi_name = package.name
-                    mpi_version = package.version
-                    break
-            else:
-                raise RuntimeError('No MPI dependency found')
-
-            hierarchy_name = self._mpi_module_directory(cname, cversion, mpi_name, mpi_version)
+            compiler = self.spec.compiler
+            mpi = self.spec['mpi']
+            hierarchy_name = self._mpi_module_directory(compiler.name, compiler.version, mpi.name, mpi.version)
         else:
             # If I am here it means that I am using the system compiler with some MPI
             # TODO : decide how to deal with this case
@@ -370,11 +361,11 @@ class LmodModule(EnvModule):
 
     def _use_system_compiler(self):
         """
-        True if the spec uses the default compiler (which is assumed to be the one provided by the system)
+        True if the spec uses the OS default compiler
 
         :return: True or False
         """
-        # FIXME: How can I check if a spec has been constructed using the system compiler?
+        # FIXME: How can I check if a spec has been constructed using the OS default compiler?
         compiler = spack.compilers.compiler_for_spec(self.spec.compiler)
         compiler_directory = os.path.dirname(compiler.cc)
         if spack.prefix in compiler_directory:
