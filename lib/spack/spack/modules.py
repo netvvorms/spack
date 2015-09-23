@@ -281,22 +281,18 @@ class LmodModule(EnvModule):
     @property
     def file_name(self):
         modulefiles_name = LmodModule.path
-        if self._use_system_compiler():
-            # If the module is installed using the system compiler put the modulefile in 'Core'
+        if self._use_system_compiler() and not self._is_mpi_dependent():
+            # If the module is installed using the system compiler and does not need MPI put the modulefile in 'Core'
             hierarchy_name = 'Core'
         elif not self._is_mpi_dependent():
             # If the module is serial and built using a compiler other than the system one,
             # put the modulefile in '<Compiler>/<Version>'
             hierarchy_name = self._compiler_module_directory(self.spec.compiler.name, self.spec.compiler.version)
-        elif self._is_mpi_dependent() and not self._use_system_compiler():
+        else:
             # If the module is MPI parallel then put the modulefile in '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
             compiler = self.spec.compiler
             mpi = self.spec['mpi']
             hierarchy_name = self._mpi_module_directory(compiler.name, compiler.version, mpi.name, mpi.version)
-        else:
-            # If I am here it means that I am using the system compiler with some MPI
-            # TODO : decide how to deal with this case
-            pass
         fullname = join_path(modulefiles_name, hierarchy_name, self.spec.name, str(self.spec.version) + '.lua')
         return fullname
 
