@@ -311,6 +311,7 @@ class LmodModule(EnvModule):
 
     @property
     def use_name(self):
+        # FIXME : this needs to be implemented. It seems to be used only in module.module_find(m_type, spec_array)
         pass
 
     @staticmethod
@@ -381,4 +382,12 @@ class LmodModule(EnvModule):
         return True
 
     def _is_mpi_dependent(self):
-        return 'mpi' in self.spec.package.dependencies
+        """
+        Traverse the DAG (excluding root) to see if the spec depends on MPI
+
+        :return: True or False
+        """
+        for item in self.spec.traverse(root=False):
+            if 'mpi' in item:
+                return True
+        return False
