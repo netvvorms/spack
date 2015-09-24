@@ -277,10 +277,11 @@ class LmodModule(EnvModule):
             self.family = 'mpi'
         else:
             self.family = None
+        # Sets the root directory for this architecture
+        self.modules_root = join_path(LmodModule.path, self.spec.architecture)
 
     @property
     def file_name(self):
-        modulefiles_name = LmodModule.path
         if self._use_system_compiler() and not self._is_mpi_dependent():
             # If the module is installed using the system compiler and does not need MPI put the modulefile in 'Core'
             hierarchy_name = 'Core'
@@ -289,17 +290,17 @@ class LmodModule(EnvModule):
             # put the modulefile in '<Compiler>/<Version>'
             hierarchy_name = self._compiler_module_directory(self.spec.compiler.name, self.spec.compiler.version)
         else:
-            # If the module is MPI parallel then put the modulefile in '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
+            # If the module is MPI parallel then put the modulefile in
+            # '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
             compiler = self.spec.compiler
             mpi = self.spec['mpi']
             hierarchy_name = self._mpi_module_directory(compiler.name, compiler.version, mpi.name, mpi.version)
-        fullname = join_path(modulefiles_name, hierarchy_name, self.spec.name, str(self.spec.version) + '.lua')
+        fullname = join_path(self.modules_root, hierarchy_name, self.use_name + '.lua')
         return fullname
 
     @property
     def use_name(self):
-        # FIXME : this needs to be implemented. It seems to be used only in module.module_find(m_type, spec_array)
-        pass
+        return join_path(self.spec.name, str(self.spec.version))
 
     @staticmethod
     def _compiler_module_directory(name, version):
@@ -347,12 +348,12 @@ class LmodModule(EnvModule):
         # Prepend path if family is 'compiler' or 'mpi'
         if self.family is 'compiler':
             hierarchy_name = self._compiler_module_directory(self.spec.name, self.spec.version)
-            fullname = join_path(LmodModule.path, hierarchy_name)
+            fullname = join_path(self.modules_root, hierarchy_name)
             m_file.write("prepend_path(\"MODULEPATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
         elif self.family is 'mpi':
             s = self.spec
             hierarchy_name = self._mpi_module_directory(s.compiler.name, s.compiler.version, s.name, s.version)
-            fullname = join_path(LmodModule.path, hierarchy_name)
+            fullname = join_path(self.modules_root, hierarchy_name)
             m_file.write("prepend_path(\"MODULEPATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
 
     def _use_system_compiler(self):
