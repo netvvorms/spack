@@ -56,6 +56,9 @@ from llnl.util.filesystem import join_path, mkdirp
 
 import spack
 
+import spack.compilers  # Needed by LmodModules
+
+
 """Registry of all types of modules.  Entries created by EnvModule's
    metaclass."""
 module_types = {}
@@ -259,3 +262,120 @@ class TclModule(EnvModule):
                 m_file.write("prepend-path %s \"%s\"\n" % (var, directory))
 
         m_file.write("prepend-path CMAKE_PREFIX_PATH \"%s\"\n" % self.spec.prefix)
+
+
+class LmodModule(EnvModule):
+    name = 'lmod'
+    path = join_path(spack.share_path, "lmod", "modulefiles")
+
+    def __init__(self, spec=None):
+        super(LmodModule, self).__init__(spec)
+        # Sets tha appropriate category to be used with the 'family' function
+        if self.spec.name in spack.compilers.supported_compilers():
+            self.family = 'compiler'
+        elif self.spec.package.provides('mpi'):
+            self.family = 'mpi'
+        else:
+            self.family = None
+        # Sets the root directory for this architecture
+        self.modules_root = join_path(LmodModule.path, self.spec.architecture)
+
+    @property
+    def file_name(self):
+        if self._use_system_compiler() and not self._is_mpi_dependent():
+            # If the module is installed using the system compiler and does not need MPI put the modulefile in 'Core'
+            hierarchy_name = 'Core'
+        elif not self._is_mpi_dependent():
+            # If the module is serial and built using a compiler other than the system one,
+            # put the modulefile in '<Compiler>/<Version>'
+            hierarchy_name = self._compiler_module_directory(self.spec.compiler.name, self.spec.compiler.version)
+        else:
+            # If the module is MPI parallel then put the modulefile in
+            # '<MPI>/<MPI-Version>/<Compiler/<Compiler-Version>'
+            compiler = self.spec.compiler
+            mpi = self.spec['mpi']
+            hierarchy_name = self._mpi_module_directory(compiler.name, compiler.version, mpi.name, mpi.version)
+        fullname = join_path(self.modules_root, hierarchy_name, self.use_name + '.lua')
+        return fullname
+
+    @property
+    def use_name(self):
+        return join_path(self.spec.name, str(self.spec.version))
+
+    @staticmethod
+    def _compiler_module_directory(name, version):
+        return '{compiler_name}/{compiler_version}'.format(
+                compiler_name=name,
+                compiler_version=version
+            )
+
+    @staticmethod
+    def _mpi_module_directory(compiler_name, compiler_version, mpi_name, mpi_version):
+        return '{mpi_name}/{mpi_version}/{compiler_name}/{compiler_version}'.format(
+                mpi_name=mpi_name,
+                mpi_version=mpi_version,
+                compiler_name=compiler_name,
+                compiler_version=compiler_version
+            )
+
+    def _write(self, m_file):
+        # Header as in
+        # https://www.tacc.utexas.edu/research-development/tacc-projects/lmod/advanced-user-guide/more-about-writing-module-files
+        m_file.write("-- -*- lua -*-\n")
+        # Short description -> whatis()
+        if self.short_description:
+            m_file.write("whatis([[Name : {name}]])\n".format(name=self.spec.name))
+            m_file.write("whatis([[Version : {version}]])\n".format(version=self.spec.version))
+
+        # Long description -> help()
+        if self.long_description:
+            doc = re.sub(r'"', '\"', self.long_description)
+            m_file.write("help([[{documentation}]])\n".format(documentation=doc))
+
+        # Path alterations
+        for var, dirs in self.paths.items():
+            for directory in dirs:
+                m_file.write("prepend_path(\"{variable}\", \"{directory}\")\n".format(
+                    variable=var,
+                    directory=directory)
+                )
+        m_file.write("prepend_path(\"CMAKE_PREFIX_PATH\", \"{cmake_prefix}\")\n".format(cmake_prefix=self.spec.prefix))
+
+        # Add family protection
+        if self.family is not None:
+            m_file.write("family(\"{family}\")\n".format(family=self.family))
+
+        # Prepend path if family is 'compiler' or 'mpi'
+        if self.family is 'compiler':
+            hierarchy_name = self._compiler_module_directory(self.spec.name, self.spec.version)
+            fullname = join_path(self.modules_root, hierarchy_name)
+            m_file.write("prepend_path(\"MODULEPATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
+        elif self.family is 'mpi':
+            s = self.spec
+            hierarchy_name = self._mpi_module_directory(s.compiler.name, s.compiler.version, s.name, s.version)
+            fullname = join_path(self.modules_root, hierarchy_name)
+            m_file.write("prepend_path(\"MODULEPATH\", \"{compiler_directory}\")".format(compiler_directory=fullname))
+
+    def _use_system_compiler(self):
+        """
+        True if the spec uses the OS default compiler
+
+        :return: True or False
+        """
+        # FIXME: How can I check if a spec has been constructed using the OS default compiler?
+        compiler = spack.compilers.compiler_for_spec(self.spec.compiler)
+        compiler_directory = os.path.dirname(compiler.cc)
+        if spack.prefix in compiler_directory:
+            return False
+        return True
+
+    def _is_mpi_dependent(self):
+        """
+        Traverse the DAG (excluding root) to see if the spec depends on MPI
+
+        :return: True or False
+        """
+        for item in self.spec.traverse(root=False):
+            if 'mpi' in item:
+                return True
+        return False
