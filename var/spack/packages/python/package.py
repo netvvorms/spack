@@ -2,6 +2,7 @@ import os
 import re
 from contextlib import closing
 from llnl.util.lang import match_predicate
+from spack.util.environment import *
 
 from spack import *
 import spack
@@ -10,28 +11,47 @@ import spack
 class Python(Package):
     """The Python programming language."""
     homepage = "http://www.python.org"
-    url      = "http://www.python.org/ftp/python/2.7.8/Python-2.7.8.tar.xz"
+    url      = "http://www.python.org/ftp/python/2.7.8/Python-2.7.8.tgz"
 
     extendable = True
 
-    version('2.7.8', 'd235bdfa75b8396942e360a70487ee00')
-    version('2.7.10', 'c685ef0b8e9f27b5e3db5db12b268ac6')
+    version('3.5.1', 'be78e48cdfc1a7ad90efff146dce6cfe')
+    version('3.5.0', 'a56c0c0b45d75a0ec9c6dee933c41c36')
+    version('2.7.11', '6b6076ec9e93f05dd63e47eb9c15728b', preferred=True)
+    version('2.7.10', 'd7547558fd673bd9d38e2108c6b42521')
+    version('2.7.9', '5eebcaa0030dc4061156d3429657fb83')
+    version('2.7.8', 'd4bca0159acb0b44a781292b5231936f')
 
     depends_on("openssl")
     depends_on("bzip2")
     depends_on("readline")
     depends_on("ncurses")
     depends_on("sqlite")
+    depends_on("zlib")
 
     def install(self, spec, prefix):
         # Need this to allow python build to find the Python installation.
         env['PYTHONHOME'] = prefix
         env['MACOSX_DEPLOYMENT_TARGET'] = '10.6'
 
-        # Rest of install is pretty standard.
-        configure("--prefix=%s" % prefix,
+        # Rest of install is pretty standard except setup.py needs to be able to read the CPPFLAGS
+        # and LDFLAGS as it scans for the library and headers to build
+        configure_args= [
+                  "--prefix=%s" % prefix,
                   "--with-threads",
-                  "--enable-shared")
+                  "--enable-shared",
+                  "CPPFLAGS=-I%s/include -I%s/include -I%s/include -I%s/include -I%s/include -I%s/include" % (
+                       spec['openssl'].prefix, spec['bzip2'].prefix,
+                       spec['readline'].prefix, spec['ncurses'].prefix,
+                       spec['sqlite'].prefix, spec['zlib'].prefix),
+                  "LDFLAGS=-L%s/lib -L%s/lib -L%s/lib -L%s/lib -L%s/lib -L%s/lib" % (
+                       spec['openssl'].prefix, spec['bzip2'].prefix,
+                       spec['readline'].prefix, spec['ncurses'].prefix,
+                       spec['sqlite'].prefix, spec['zlib'].prefix)
+                  ]
+        if spec.satisfies('@3:'):
+            configure_args.append('--without-ensurepip')
+        configure(*configure_args)
         make()
         make("install")
 
@@ -63,7 +83,10 @@ class Python(Package):
             python('setup.py', 'install', '--prefix=%s' % prefix)
         """
         # Python extension builds can have a global python executable function
-        module.python = Executable(join_path(spec.prefix.bin, 'python'))
+        if self.version >= Version("3.0.0") and self.version < Version("4.0.0"):
+            module.python = Executable(join_path(spec.prefix.bin, 'python3'))
+        else:
+            module.python = Executable(join_path(spec.prefix.bin, 'python'))
 
         # Add variables for lib/pythonX.Y and lib/pythonX.Y/site-packages dirs.
         module.python_lib_dir     = os.path.join(ext_spec.prefix, self.python_lib_dir)
@@ -95,7 +118,7 @@ class Python(Package):
 
         # Ignore pieces of setuptools installed by other packages.
         if ext_pkg.name != 'py-setuptools':
-            patterns.append(r'/site\.pyc?$')
+            patterns.append(r'/site[^/]*\.pyc?$')
             patterns.append(r'setuptools\.pth')
             patterns.append(r'bin/easy_install[^/]*$')
             patterns.append(r'setuptools.*egg$')

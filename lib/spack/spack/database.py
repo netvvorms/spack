@@ -54,6 +54,7 @@ import spack.spec
 from spack.version import Version
 from spack.spec import Spec
 from spack.error import SpackError
+from spack.packages import UnknownPackageError
 
 # DB goes in this directory underneath the root
 _db_dirname = '.spack-db'
@@ -210,6 +211,10 @@ class Database(object):
         for dep_hash in spec_dict[spec.name]['dependencies'].values():
             child = self._read_spec_from_yaml(dep_hash, installs, hash_key)
             spec._add_dependency(child)
+
+        # Specs from the database need to be marked concrete because
+        # they represent actual installations.
+        spec._mark_concrete()
 
         return spec
 

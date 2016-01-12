@@ -55,7 +55,11 @@
 # avoids the need to come up with a user-friendly naming scheme for
 # spack dotfiles.
 ########################################################################
+
 function spack {
+    # save raw arguments into an array before butchering them
+    args=( "$@" )
+
     # accumulate initial flags for main spack command
     _sp_flags=""
     while [[ "$1" =~ ^- ]]; do
@@ -116,7 +120,7 @@ function spack {
             esac
             ;;
         *)
-            command spack $_sp_flags $_sp_subcommand $_sp_spec
+            command spack "${args[@]}"
             ;;
     esac
 }
@@ -167,8 +171,8 @@ fi
 #
 _sp_share_dir=$(cd "$(dirname $_sp_source_file)" && pwd)
 _sp_prefix=$(cd "$(dirname $(dirname $_sp_share_dir))" && pwd)
+_spack_pathadd PATH       "${_sp_prefix%/}/bin"
 
-# TODO: fix SYS_TYPE to something non-LLNL-specific
-_spack_pathadd DK_NODE    "$_sp_share_dir/dotkit/$SYS_TYPE"
-_spack_pathadd MODULEPATH "$_sp_share_dir/modules/$SYS_TYPE"
-_spack_pathadd PATH       "$_sp_prefix/bin"
+_sp_sys_type=$(spack-python -c 'print(spack.architecture.sys_type())')
+_spack_pathadd DK_NODE    "${_sp_share_dir%/}/dotkit/$_sp_sys_type"
+_spack_pathadd MODULEPATH "${_sp_share_dir%/}/modules/$_sp_sys_type"

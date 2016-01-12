@@ -24,7 +24,8 @@ class Paraview(Package):
 
     depends_on('bzip2')
     depends_on('freetype')
-    depends_on('hdf5') # drags in mpi
+    depends_on('hdf5')
+    depends_on('hdf5+mpi', when='+mpi')
     depends_on('jpeg')
     depends_on('libpng')
     depends_on('libtiff')
@@ -58,6 +59,10 @@ class Paraview(Package):
             feature_args.append('-DVTK_RENDERING_BACKEND:STRING=%s' % feature_to_bool('+opengl2', 'OpenGL2', 'OpenGL'))
 
             feature_args.extend(std_cmake_args)
+
+            if 'darwin' in self.spec.architecture:
+                feature_args.append('-DVTK_USE_X:BOOL=OFF')
+                feature_args.append('-DPARAVIEW_DO_UNIX_STYLE_INSTALLS:BOOL=ON')
 
             cmake('..',
                 '-DCMAKE_INSTALL_PREFIX:PATH=%s' % prefix,
