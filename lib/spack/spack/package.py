@@ -58,6 +58,7 @@ import spack.compilers
 import spack.mirror
 import spack.hooks
 import spack.directives
+import spack.repository
 import spack.build_environment
 import spack.url
 import spack.util.web
@@ -66,6 +67,7 @@ from spack.version import *
 from spack.stage import Stage, ResourceStage, StageComposite
 from spack.util.compression import allowed_archive, extension
 from spack.util.executable import ProcessError
+from spack.util.environment import dump_environment
 
 """Allowed URL schemes for spack packages."""
 _ALLOWED_URL_SCHEMES = ["http", "https", "ftp", "file", "git"]
@@ -501,6 +503,7 @@ class Package(object):
             self._fetcher = self._make_fetcher()
         return self._fetcher
 
+
     @fetcher.setter
     def fetcher(self, f):
         self._fetcher = f
@@ -685,7 +688,7 @@ class Package(object):
 
             if not ignore_checksum:
                 raise FetchError(
-                    "Will not fetch %s." % self.spec.format('$_$@'), checksum_msg)
+                    "Will not fetch %s" % self.spec.format('$_$@'), checksum_msg)
 
         self.stage.fetch(mirror_only)
 
@@ -719,7 +722,7 @@ class Package(object):
 
         # If there are no patches, note it.
         if not self.patches and not has_patch_fun:
-            tty.msg("No patches needed for %s." % self.name)
+            tty.msg("No patches needed for %s" % self.name)
             return
 
         # Construct paths to special files in the archive dir used to
@@ -742,7 +745,7 @@ class Package(object):
             tty.msg("Already patched %s" % self.name)
             return
         elif os.path.isfile(no_patches_file):
-            tty.msg("No patches needed for %s." % self.name)
+            tty.msg("No patches needed for %s" % self.name)
             return
 
         # Apply all the patches for specs that match this one
@@ -763,10 +766,10 @@ class Package(object):
         if has_patch_fun:
             try:
                 self.patch()
-                tty.msg("Ran patch() for %s." % self.name)
+                tty.msg("Ran patch() for %s" % self.name)
                 patched = True
             except:
-                tty.msg("patch() function failed for %s." % self.name)
+                tty.msg("patch() function failed for %s" % self.name)
                 touch(bad_file)
                 raise
 
@@ -835,7 +838,7 @@ class Package(object):
             raise ValueError("Can only install concrete packages.")
 
         if os.path.exists(self.prefix):
-            tty.msg("%s is already installed in %s." % (self.name, self.prefix))
+            tty.msg("%s is already installed in %s" % (self.name, self.prefix))
             return
 
         tty.msg("Installing %s" % self.name)
@@ -871,7 +874,7 @@ class Package(object):
 
         def real_work():
             try:
-                tty.msg("Building %s." % self.name)
+                tty.msg("Building %s" % self.name)
 
                 # Run the pre-install hook in the child process after
                 # the directory is created.
@@ -884,10 +887,14 @@ class Package(object):
                     # Do the real install in the source directory.
                     self.stage.chdir_to_source()
 
+                    # Save the build environment in a file before building.
+                    env_path = join_path(os.getcwd(), 'spack-build.env')
+
                     # This redirects I/O to a build log (and optionally to the terminal)
                     log_path = join_path(os.getcwd(), 'spack-build.out')
                     log_file = open(log_path, 'w')
                     with log_output(log_file, verbose, sys.stdout.isatty(), True):
+                        dump_environment(env_path)
                         self.install(self.spec, self.prefix)
 
                 # Ensure that something was actually installed.
@@ -896,7 +903,12 @@ class Package(object):
                 # Move build log into install directory on success
                 if not fake:
                     log_install_path = spack.install_layout.build_log_path(self.spec)
+                    env_install_path = spack.install_layout.build_env_path(self.spec)
                     install(log_path, log_install_path)
+                    install(env_path, env_install_path)
+
+                packages_dir = spack.install_layout.build_packages_path(self.spec)
+                dump_packages(self.spec, packages_dir)
 
                 # On successful install, remove the stage.
                 if not keep_stage:
@@ -906,8 +918,8 @@ class Package(object):
                 self._total_time = time.time() - start_time
                 build_time = self._total_time - self._fetch_time
 
-                tty.msg("Successfully installed %s." % self.name,
-                        "Fetch: %s.  Build: %s.  Total: %s."
+                tty.msg("Successfully installed %s" % self.name,
+                        "Fetch: %s.  Build: %s.  Total: %s"
                         % (_hms(self._fetch_time), _hms(build_time), _hms(self._total_time)))
                 print_pkg(self.prefix)
 
@@ -1013,7 +1025,7 @@ class Package(object):
         # Uninstalling in Spack only requires removing the prefix.
         self.remove_prefix()
         spack.installed_db.remove(self.spec)
-        tty.msg("Successfully uninstalled %s." % self.spec.short_spec)
+        tty.msg("Successfully uninstalled %s" % self.spec.short_spec)
 
         # Once everything else is done, run post install hooks
         spack.hooks.post_uninstall(self)
@@ -1060,7 +1072,7 @@ class Package(object):
         self.extendee_spec.package.activate(self, **self.extendee_args)
 
         spack.install_layout.add_extension(self.extendee_spec, self.spec)
-        tty.msg("Activated extension %s for %s."
+        tty.msg("Activated extension %s for %s"
                 % (self.spec.short_spec, self.extendee_spec.format("$_$@$+$%@")))
 
 
@@ -1112,7 +1124,7 @@ class Package(object):
         if self.activated:
             spack.install_layout.remove_extension(self.extendee_spec, self.spec)
 
-        tty.msg("Deactivated extension %s for %s."
+        tty.msg("Deactivated extension %s for %s"
                 % (self.spec.short_spec, self.extendee_spec.format("$_$@$+$%@")))
 
 
@@ -1212,6 +1224,52 @@ def validate_package_url(url_string):
         tty.die("Invalid file type in URL: '%s'" % url_string)
 
 
+def dump_packages(spec, path):
+    """Dump all package information for a spec and its dependencies.
+
+       This creates a package repository within path for every
+       namespace in the spec DAG, and fills the repos wtih package
+       files and patch files for every node in the DAG.
+    """
+    mkdirp(path)
+
+    # Copy in package.py files from any dependencies.
+    # Note that we copy them in as they are in the *install* directory
+    # NOT as they are in the repository, because we want a snapshot of
+    # how *this* particular build was done.
+    for node in spec.traverse():
+        if node is not spec:
+            # Locate the dependency package in the install tree and find
+            # its provenance information.
+            source = spack.install_layout.build_packages_path(node)
+            source_repo_root = join_path(source, node.namespace)
+
+            # There's no provenance installed for the source package.  Skip it.
+            # User can always get something current from the builtin repo.
+            if not os.path.isdir(source_repo_root):
+                continue
+
+            # Create a source repo and get the pkg directory out of it.
+            try:
+                source_repo = spack.repository.Repo(source_repo_root)
+                source_pkg_dir = source_repo.dirname_for_package_name(node.name)
+            except RepoError as e:
+                tty.warn("Warning: Couldn't copy in provenance for %s" % node.name)
+
+        # Create a destination repository
+        dest_repo_root = join_path(path, node.namespace)
+        if not os.path.exists(dest_repo_root):
+            spack.repository.create_repo(dest_repo_root)
+        repo = spack.repository.Repo(dest_repo_root)
+
+        # Get the location of the package in the dest repo.
+        dest_pkg_dir = repo.dirname_for_package_name(node.name)
+        if node is not spec:
+            install_tree(source_pkg_dir, dest_pkg_dir)
+        else:
+            spack.repo.dump_provenance(node, dest_pkg_dir)
+
+
 def print_pkg(message):
     """Outputs a message with a package icon."""
     from llnl.util.tty.color import cwrite
@@ -1262,7 +1320,7 @@ class PackageVersionError(PackageError):
     """Raised when a version URL cannot automatically be determined."""
     def __init__(self, version):
         super(PackageVersionError, self).__init__(
-            "Cannot determine a URL automatically for version %s." % version,
+            "Cannot determine a URL automatically for version %s" % version,
             "Please provide a url for this version in the package.py file.")
 
 
